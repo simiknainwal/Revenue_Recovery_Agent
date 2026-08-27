@@ -4,7 +4,12 @@ const { detectIntent } = require("./intentDetector");
 const { extractPromiseDate } = require("./dateExtractor");
 const { analyzeCustomerMessage } =
     require("./aiIntentDetector");
-const express = require("express");
+    const { checkPromise } = require("./promiseTracker");
+    const { executeAction } = require("./actionExecutor");
+const cron = require("node-cron");
+const { startAgentScheduler } = require("./agentScheduler");
+const { processDueCases } = require("./agentProcessor");
+    const express = require("express");
 const { getConnection } = require("./db");
 
 const app = express();
@@ -280,6 +285,11 @@ app.get("/api/agent/decide/:id", async (req, res) => {
             interactionResult.rows
         );
 
+        const execution = await executeAction(
+    connection,
+    recoveryCase,
+    decision.action
+);
 
         res.json({
             success: true,
@@ -878,8 +888,273 @@ app.post("/api/ai/analyze", async (req, res) => {
     }
 });
 
+//Checks whether a successful payment exist.
+
+app.post("/api/agent/check-promise/:id", async (req, res) => {
+    let connection;
+
+    try {
+        const caseId = Number(req.params.id);
+
+        if (!Number.isInteger(caseId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid case ID"
+            });
+        }
+
+        connection = await getConnection();
+
+        // Get case information
+        const caseResult = await connection.execute(
+            `
+            SELECT
+                rc.case_id,
+                rc.customer_id,
+                rc.payment_id,
+                rc.checkout_id,
+                rc.case_type,
+                rc.status,
+                rc.next_action,
+                rc.next_action_time
+            FROM RECOVERY_CASE rc
+            WHERE rc.case_id = :caseId
+            `,
+            { caseId }
+        );
+
+        if (caseResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Recovery case not found"
+            });
+        }
+
+        const recoveryCase = caseResult.rows[0];
+
+        // Only promised cases should enter this workflow
+        if (recoveryCase.STATUS !== "PROMISED") {
+            return res.status(400).json({
+                success: false,
+                message: "This case is not in PROMISED state"
+            });
+        }
+
+        // Don't follow up before the promised date
+        if (
+            recoveryCase.NEXT_ACTION_TIME &&
+            new Date(recoveryCase.NEXT_ACTION_TIME) > new Date()
+        ) {
+            return res.json({
+                success: true,
+                caseId,
+                actionTaken: "NONE",
+                status: "PROMISED",
+                message: "Promise date has not arrived yet",
+                followUpTime: recoveryCase.NEXT_ACTION_TIME
+            });
+        }
+
+        // Check whether payment was made for the EXACT subscription/order
+let paymentResult;
+
+if (recoveryCase.CASE_TYPE === "SUBSCRIPTION_FAILURE") {
+
+    // Find the subscription associated with the original failed payment
+    const failedPaymentResult = await connection.execute(
+        `
+        SELECT subscription_id
+        FROM PAYMENT
+        WHERE payment_id = :paymentId
+        `,
+        {
+            paymentId: recoveryCase.PAYMENT_ID
+        }
+    );
+
+    if (failedPaymentResult.rows.length === 0) {
+        throw new Error("Original failed payment not found");
+    }
+
+    const subscriptionId =
+        failedPaymentResult.rows[0].SUBSCRIPTION_ID;
+
+    // Check for a successful payment for THIS subscription
+    paymentResult = await connection.execute(
+        `
+        SELECT payment_id
+        FROM PAYMENT
+        WHERE subscription_id = :subscriptionId
+          AND status = 'SUCCESS'
+          AND payment_time >= :promiseTime
+        FETCH FIRST 1 ROW ONLY
+        `,
+        {
+            subscriptionId,
+            promiseTime: recoveryCase.NEXT_ACTION_TIME
+        }
+    );
+
+} else if (recoveryCase.CASE_TYPE === "CHECKOUT_ABANDONMENT") {
+
+    // Find order associated with this checkout
+    const checkoutResult = await connection.execute(
+        `
+        SELECT order_id
+        FROM CHECKOUT_SESSION
+        WHERE checkout_id = :checkoutId
+        `,
+        {
+            checkoutId: recoveryCase.CHECKOUT_ID
+        }
+    );
+
+    if (checkoutResult.rows.length === 0) {
+        throw new Error("Checkout session not found");
+    }
+
+    const orderId = checkoutResult.rows[0].ORDER_ID;
+
+    // Check successful payment for THIS order
+    paymentResult = await connection.execute(
+        `
+        SELECT payment_id
+        FROM PAYMENT
+        WHERE order_id = :orderId
+          AND status = 'SUCCESS'
+          AND payment_time >= :promiseTime
+        FETCH FIRST 1 ROW ONLY
+        `,
+        {
+            orderId,
+            promiseTime: recoveryCase.NEXT_ACTION_TIME
+        }
+    );
+
+} else {
+
+    throw new Error(
+        `Unsupported recovery case type: ${recoveryCase.CASE_TYPE}`
+    );
+}
+
+        // Payment found
+        if (paymentResult.rows.length > 0) {
+
+            await connection.execute(
+                `
+                UPDATE RECOVERY_CASE
+                SET status = 'RECOVERED',
+                    next_action = NULL,
+                    next_action_time = NULL
+                WHERE case_id = :caseId
+                `,
+                { caseId }
+            );
+
+            await connection.commit();
+
+            return res.json({
+                success: true,
+                caseId,
+                actionTaken: "CLOSE_CASE",
+                status: "RECOVERED",
+                message: "Payment received. Recovery case closed."
+            });
+        }
+
+        // No payment after promise date
+        await connection.execute(
+            `
+            UPDATE RECOVERY_CASE
+            SET status = 'IN_PROGRESS',
+                next_action = 'SEND_REMINDER',
+                next_action_time = SYSDATE
+            WHERE case_id = :caseId
+            `,
+            { caseId }
+        );
+
+        await connection.commit();
+
+        return res.json({
+            success: true,
+            caseId,
+            actionTaken: "SEND_REMINDER",
+            status: "IN_PROGRESS",
+            message: "Promise date passed but payment was not received."
+        });
+
+    } catch (err) {
+
+        if (connection) {
+            await connection.rollback();
+        }
+
+        console.error("PROMISE CHECK ERROR:", err);
+
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+
+    } finally {
+
+        if (connection) {
+            await connection.close();
+        }
+    }
+});
+
+//For all process dues.
+app.post("/api/agent/process-due-cases", async (req, res) => {
+
+    try {
+
+        const result = await processDueCases();
+
+        res.json({
+            success: true,
+            ...result
+        });
+
+    } catch (err) {
+
+        console.error("PROCESS DUE CASES ERROR:", err);
+
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
+//                   ┌──────────────────┐
+//                   │   node-cron      │
+//                   │   every 5 min    │
+//                   └────────┬─────────┘
+//                            ↓
+//                   processDueCases()
+//                            ↓
+//               ┌────────────┴────────────┐
+//               ↓                         ↓
+//        PROMISED case              Other due case
+//               ↓                         ↓
+//        Promise Tracker            Decision Engine
+//               ↓                         ↓
+//        Check payment              Choose action
+//               ↓                         ↓
+//        ┌──────┴──────┐            Action Executor
+//        ↓             ↓                   ↓
+//    RECOVERED     FOLLOW-UP        RECOVERY_ATTEMPT
+//        └─────────────┴───────────────────┘
+//                            ↓
+//                        Oracle DB
 
 
 app.listen(PORT, () => {
+
     console.log(`Server running on port ${PORT}`);
+
+    startAgentScheduler();
 });
