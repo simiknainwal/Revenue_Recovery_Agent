@@ -1,4 +1,36 @@
-#Created one unified revenue_risk view
+SELECT MAX(case_id) AS max_case_id
+FROM RECOVERY_CASE;
+
+-- #For sequencing we start from 7 as my highest case_ID is 6
+
+CREATE SEQUENCE recovery_case_seq
+START WITH 7
+INCREMENT BY 1
+NOCACHE;
+
+SELECT recovery_case_seq.NEXTVAL
+FROM dual;
+-- #Created one unified revenue_risk view
+
+
+-- Sequence for RECOVERY_ATTEMPT
+
+SELECT MAX(attempt_id) AS max_attempt_id
+FROM RECOVERY_ATTEMPT;
+
+CREATE SEQUENCE recovery_attempt_seq
+START WITH 12
+INCREMENT BY 1
+NOCACHE;
+
+-- sequence for interaction_id
+SELECT MAX(interaction_id)
+FROM CUSTOMER_INTERACTION;
+
+CREATE SEQUENCE customer_interaction_seq
+START WITH 11
+INCREMENT BY 1
+NOCACHE;
 
 CREATE OR REPLACE VIEW REVENUE_RISK AS
 
@@ -26,9 +58,9 @@ FROM CUSTOMER c,SUBSCRIPTION s,PAYMENT p
 
     where c.customer_id = s.customer_id AND s.subscription_id = p.subscription_id AND p.status = 'FAILED';
 
-select* from revenue_risk
+select* from revenue_risk;
 
-#This will insert the row only when it doesn't already exists in the table.
+-- #This will insert the row only when it doesn't already exists in the table.
 
 INSERT INTO RECOVERY_CASE
 (
@@ -59,7 +91,7 @@ AND NOT EXISTS (
     AND rc.status IN ('OPEN', 'IN_PROGRESS')
 );
 
-#Same is for fails subscriptions.
+-- #Same is for fails subscriptions.
 
 INSERT INTO RECOVERY_CASE
 (
@@ -91,25 +123,13 @@ AND NOT EXISTS (
     AND rc.status IN ('OPEN', 'IN_PROGRESS')
 );
 
-select* from RECOVERY_CASE
-
-SELECT MAX(case_id) AS max_case_id
-FROM RECOVERY_CASE;
-
-#For sequencing we start from 7 as my highest case_ID is 6
-
-CREATE SEQUENCE recovery_case_seq
-START WITH 7
-INCREMENT BY 1
-NOCACHE;
-
-SELECT recovery_case_seq.NEXTVAL
-FROM dual;
+select* from RECOVERY_CASE;
 
 
 
 
-#Simulating the action because we don't have SMS/Voice Call service.
+
+-- #Simulating the action because we don't have SMS/Voice Call service.
 
 INSERT INTO RECOVERY_ATTEMPT
 (
@@ -135,7 +155,7 @@ FROM RECOVERY_CASE
 WHERE case_id = 6;
 
 
-#Because the customer didn't respond so we are updating channel to voice call for case_id=6
+-- #Because the customer didn't respond so we are updating channel to voice call for case_id=6
 
 UPDATE RECOVERY_CASE
 SET
@@ -144,7 +164,7 @@ SET
     next_action_time = SYSDATE
 WHERE case_id = 6;
 
-#Now we simulate voice call suppose person denied so we store that in CUSTOMER_INTERACTION.
+-- #Now we simulate voice call suppose person denied so we store that in CUSTOMER_INTERACTION.
 
 INSERT INTO CUSTOMER_INTERACTION
 (
@@ -170,7 +190,7 @@ SELECT *
 FROM CUSTOMER_INTERACTION
 WHERE case_id = 6;
 
-#We also update in RECOVERY_ATTEMPT
+-- #We also update in RECOVERY_ATTEMPT
 
 INSERT INTO RECOVERY_ATTEMPT
 (
@@ -192,7 +212,7 @@ VALUES
 );
 
 
-#Now because customer has promised to pay so we need to change result.
+-- #Now because customer has promised to pay so we need to change result.
 
 UPDATE RECOVERY_CASE
 SET
@@ -201,7 +221,7 @@ SET
     next_action_time = SYSDATE + 3
 WHERE case_id = 6;
 
-#Now we see complete case history.
+-- #Now we see complete case history.
 
 SELECT
     rc.case_id,
@@ -215,3 +235,5 @@ SELECT
 FROM RECOVERY_CASE rc, RECOVERY_ATTEMPT ra
 where rc.case_id = ra.case_id AND rc.case_id = 6
 ORDER BY ra.attempt_time;
+
+commit;

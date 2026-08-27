@@ -106,7 +106,7 @@ VALUES
 (505, 5, 599.00, SYSDATE + 5, 'FAILED');
 
 
-#unsuccessful
+-- #unsuccessful
 
 INSERT INTO PAYMENT
 (payment_id, customer_id, order_id, subscription_id,
@@ -131,7 +131,7 @@ VALUES
  599.00, 'FAILED', 'CARD_EXPIRED', SYSDATE - 1);
 
 
-#successful
+-- #successful
 INSERT INTO PAYMENT
 (payment_id, customer_id, order_id, subscription_id,
  amount, status, failure_reason, payment_time)
@@ -149,7 +149,7 @@ VALUES
 
 
 
-#Agent part
+-- #Agent part
 
 INSERT INTO RECOVERY_CASE
 (case_id, customer_id, payment_id, checkout_id,
@@ -209,7 +209,7 @@ VALUES
 
 
 
-#Recovery Reminder
+-- #Recovery Reminder
 
 INSERT INTO RECOVERY_ATTEMPT
 (attempt_id, case_id, channel, action, result, attempt_time)
@@ -230,7 +230,7 @@ VALUES
 
 
 
-#Hinglish conversations
+-- #Hinglish conversations
 
 INSERT INTO CUSTOMER_INTERACTION
 (interaction_id, case_id, channel, language,
@@ -250,8 +250,8 @@ VALUES
  'PAY_NOW');
 
 
-
-select* from CUSTOMER
+commit;
+SELECT * FROM CUSTOMER;
 
 
 

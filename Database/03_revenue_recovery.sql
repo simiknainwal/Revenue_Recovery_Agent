@@ -1,5 +1,5 @@
 
-#Join commands to display abandoned checkouts.
+-- #Join commands to display abandoned checkouts.
 
 SELECT c.name,
        co.order_id,
@@ -11,7 +11,7 @@ where c.customer_id = co.customer_id AND
       cs.status = 'ABANDONED';
 
 
-#Failed subscriptions.
+-- #Failed subscriptions.
 
 
 SELECT c.name,
@@ -25,7 +25,7 @@ FROM CUSTOMER c,SUBSCRIPTION s,PAYMENT p
  AND p.status = 'FAILED';
 
  
-#Join commands to display abandoned checkouts.
+-- #Join commands to display abandoned checkouts.
 
 SELECT c.name,
        co.order_id,
@@ -37,7 +37,7 @@ where c.customer_id = co.customer_id AND
       cs.status = 'ABANDONED';
 
 
-#Failed subscriptions.
+-- #Failed subscriptions.
 
 
 SELECT c.name,
@@ -50,15 +50,17 @@ FROM CUSTOMER c,SUBSCRIPTION s,PAYMENT p
  AND s.subscription_id = p.subscription_id
  AND p.status = 'FAILED';
 
-# Calculate revenue at risk.
+-- # Calculate revenue at risk.
 
 select sum(co.amount) as checkout_revenue_ar_risk
 from CUSTOMER_ORDER co, CHECKOUT_SESSION cs
-where co.order_id=cs.order_id AND cs.status='ABANDONED'
+where co.order_id=cs.order_id AND cs.status='ABANDONED';
 
 
-#Failed subscription revenue.
+-- #Failed subscription revenue.
 
 select sum(p.amount) as subscription_revenue_at_risk
 from PAYMENT p
-where p.status='FAILED' AND p.subscription_id is not NULL
+where p.status='FAILED' AND p.subscription_id is not NULL;
+
+commit;
