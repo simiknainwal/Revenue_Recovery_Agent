@@ -9,10 +9,13 @@ const { analyzeCustomerMessage } =
 const cron = require("node-cron");
 const { startAgentScheduler } = require("./agentScheduler");
 const { processDueCases } = require("./agentProcessor");
-    const express = require("express");
+const cors = require("cors");
+const express = require("express");
+const app = express();
+    app.use(express.json());
+    app.use(cors());
 const { getConnection } = require("./db");
 
-const app = express();
 // const promiseDate = extractPromiseDate(message);
 
 app.use(express.json());
@@ -1150,6 +1153,68 @@ app.post("/api/agent/process-due-cases", async (req, res) => {
 //        └─────────────┴───────────────────┘
 //                            ↓
 //                        Oracle DB
+
+
+//For case history
+
+app.get("/api/recovery-cases/:id/history", async (req, res) => {
+    let connection;
+
+    try {
+        connection = await getConnection();
+
+        const caseId = req.params.id;
+
+        const attemptsResult = await connection.execute(
+            `
+            SELECT
+                attempt_id,
+                case_id,
+                channel,
+                action,
+                result,
+                attempt_time
+            FROM RECOVERY_ATTEMPT
+            WHERE case_id = :caseId
+            ORDER BY attempt_time DESC
+            `,
+            {
+                caseId
+            }
+        );
+
+        const interactionsResult = await connection.execute(
+            `
+            SELECT *
+            FROM CUSTOMER_INTERACTION
+            WHERE case_id = :caseId
+            ORDER BY interaction_id DESC
+            `,
+            {
+                caseId
+            }
+        );
+
+        res.json({
+            success: true,
+            attempts: attemptsResult.rows,
+            interactions: interactionsResult.rows
+        });
+
+    } catch (err) {
+        console.error("CASE HISTORY ERROR:", err);
+
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+
+    } finally {
+        if (connection) {
+            await connection.close();
+        }
+    }
+});
 
 
 app.listen(PORT, () => {
